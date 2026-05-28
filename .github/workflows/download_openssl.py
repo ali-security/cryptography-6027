@@ -35,7 +35,7 @@ def get_response(session, url, token):
 def main(platform, target):
     if platform == "windows":
         workflow = "build-windows-openssl.yml"
-        path = "C:/"
+        path = "C:\\"
     elif platform == "macos":
         workflow = "build-macos-openssl.yml"
         path = os.environ["HOME"]
@@ -50,19 +50,21 @@ def main(platform, target):
     token = os.environ["GITHUB_TOKEN"]
     print("Looking for: {}".format(target))
     runs_url = (
-        "https://api.github.com/repos/pyca/infra/actions/workflows/"
-        "{}/runs?branch=main&status=success".format(workflow)
+        "https://api.github.com/repos/ali-security/cryptography-6027/actions/workflows/"
+        "{}/runs?status=success".format(workflow)
     )
 
     response = get_response(session, runs_url, token).json()
+    if not response.get("workflow_runs"):
+        raise ValueError(
+            "No successful runs of {} on the fork yet — trigger the workflow first".format(workflow)
+        )
     artifacts_url = response["workflow_runs"][0]["artifacts_url"]
     response = get_response(session, artifacts_url, token).json()
     for artifact in response["artifacts"]:
         if artifact["name"] == target:
             print("Found artifact")
-            response = get_response(
-                session, artifact["archive_download_url"], token
-            )
+            response = get_response(session, artifact["archive_download_url"], token)
             zipfile.ZipFile(io.BytesIO(response.content)).extractall(
                 os.path.join(path, artifact["name"])
             )

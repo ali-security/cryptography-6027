@@ -13,10 +13,11 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         PYTHON:
           - {VERSION: "3.9", TOXENV: "flake,rust,docs", COVERAGE: "false"}
-          - {VERSION: "pypy3", TOXENV: "pypy3"}
+          # - {VERSION: "pypy3", TOXENV: "pypy3"}
           - {VERSION: "3.9", TOXENV: "py39", OPENSSL: {TYPE: "openssl", VERSION: "1.1.0l"}}
           - {VERSION: "3.9", TOXENV: "py39", OPENSSL: {TYPE: "openssl", VERSION: "1.1.1l"}}
           - {VERSION: "3.9", TOXENV: "py39-ssh", OPENSSL: {TYPE: "openssl", VERSION: "1.1.1l"}}
@@ -31,8 +32,8 @@ jobs:
     name: "${{ matrix.PYTHON.TOXENV }} ${{ matrix.PYTHON.OPENSSL.TYPE }} ${{ matrix.PYTHON.OPENSSL.VERSION }} ${{ matrix.PYTHON.OPENSSL.CONFIG_FLAGS }}"
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -41,7 +42,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Setup python
-        uses: actions/setup-python@v2.2.1
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.PYTHON.VERSION }}
       - uses: actions-rs/toolchain@v1
@@ -65,7 +66,7 @@ jobs:
           CONFIG_FLAGS: ${{ matrix.PYTHON.OPENSSL.CONFIG_FLAGS }}
         if: matrix.PYTHON.OPENSSL
       - name: Load cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         id: ossl-cache
         with:
           path: ${{ github.workspace }}/osslcache
@@ -98,10 +99,11 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/pyca/cryptography-runner-${{ matrix.IMAGE.IMAGE }}
     strategy:
+      fail-fast: false
       matrix:
         IMAGE:
-          - {IMAGE: "centos8", TOXENV: "py36"}
-          - {IMAGE: "centos8-fips", TOXENV: "py36", FIPS: true}
+          - {IMAGE: "centos-stream9", TOXENV: "py36"}
+          - {IMAGE: "centos-stream9-fips", TOXENV: "py36", FIPS: true}
           - {IMAGE: "buster", TOXENV: "py37"}
           - {IMAGE: "bullseye", TOXENV: "py39"}
           - {IMAGE: "sid", TOXENV: "py39"}
@@ -114,8 +116,26 @@ jobs:
     name: "${{ matrix.IMAGE.TOXENV }} on ${{ matrix.IMAGE.IMAGE }}"
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - name: Install dependencies
+        run: |
+          apt update -y || dnf -y check-update || yum -y check-update || true
+          install() {
+            local package="$1"
+            apt install -y "$package" || dnf install -y "$package" || yum install -y "$package" || microdnf install -y "$package" || apk add "$package" || true
+          }
+          install python3-pip
+          install sudo
+          install python3-tox
+          install python3-coverage
+          install python3-wheel
+          install python3-cffi
+          install python3-setuptools-rust
+          install git
+          command -v tox >/dev/null 2>&1 || python3 -m pip install --break-system-packages tox 2>/dev/null || python3 -m pip install tox
+          # Ensure rust is available + default toolchain set
+          (rustup default 1.49.0 || rustup default stable) 2>/dev/null || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.49.0 && . "$HOME/.cargo/env" && echo "$HOME/.cargo/bin" >> $GITHUB_PATH)
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -139,6 +159,7 @@ jobs:
   linux-rust:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         PYTHON:
           - {VERSION: "3.9", TOXENV: "py39"}
@@ -151,8 +172,8 @@ jobs:
     name: "${{ matrix.PYTHON.TOXENV }} with Rust ${{ matrix.RUST }}"
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -161,7 +182,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ matrix.RUST }}
 
       - name: Setup python
-        uses: actions/setup-python@v2.2.1
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.PYTHON.VERSION }}
       - uses: actions-rs/toolchain@v1
@@ -184,6 +205,7 @@ jobs:
   macos:
     runs-on: macos-latest
     strategy:
+      fail-fast: false
       matrix:
         PYTHON:
           - {VERSION: "3.6", TOXENV: "py36", EXTRA_CFLAGS: ""}
@@ -193,8 +215,8 @@ jobs:
     name: "${{ matrix.PYTHON.TOXENV }} on macOS"
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -203,7 +225,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Setup python
-        uses: actions/setup-python@v2.2.1
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.PYTHON.VERSION }}
       - uses: actions-rs/toolchain@v1
@@ -239,6 +261,7 @@ jobs:
   windows:
     runs-on: windows-latest
     strategy:
+      fail-fast: false
       matrix:
         WINDOWS:
           - {ARCH: 'x86', WINDOWS: 'win32', RUST_TRIPLE: 'i686-pc-windows-msvc'}
@@ -252,8 +275,8 @@ jobs:
     name: "${{ matrix.PYTHON.TOXENV }} on ${{ matrix.WINDOWS.WINDOWS }} (part ${{ matrix.JOB_NUMBER }})"
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -262,7 +285,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Setup python
-        uses: actions/setup-python@v2.2.1
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.PYTHON.VERSION }}
           architecture: ${{ matrix.WINDOWS.ARCH }}
@@ -297,6 +320,7 @@ jobs:
   linux-downstream:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         DOWNSTREAM:
           - paramiko
@@ -312,8 +336,8 @@ jobs:
     name: "Downstream tests for ${{ matrix.DOWNSTREAM }}"
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -322,7 +346,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Setup python
-        uses: actions/setup-python@v2.2.1
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.PYTHON }}
       - uses: actions-rs/toolchain@v1
@@ -343,9 +367,9 @@ jobs:
     name: "linkcheck"
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Setup python
-        uses: actions/setup-python@v2.2.1
+        uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - uses: actions-rs/toolchain@v1

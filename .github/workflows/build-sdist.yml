@@ -1,0 +1,26 @@
+name: Build sdist
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "cryptography version"
+        required: true
+        default: "3.4.8"
+jobs:
+  sdist:
+    runs-on: ubuntu-latest
+    name: "Build sdist from fork source"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: python -m pip install -U pip wheel setuptools setuptools-rust cffi pycparser
+      # Bump __version__ to +sp1 — the fork branch already has every CVE source
+      # patch applied, so this produces a sealed sdist with no extra patching.
+      - run: sed -i 's|__version__ = "${{ inputs.version }}"|__version__ = "${{ inputs.version }}+sp1"|' src/cryptography/__about__.py
+      - run: python setup.py sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "cryptography-${{ inputs.version }}-sdist"
+          path: dist/cryptography-${{ inputs.version }}+sp1.tar.gz

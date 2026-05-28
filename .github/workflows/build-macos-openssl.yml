@@ -1,0 +1,63 @@
+name: macOS OpenSSL
+on:
+  workflow_dispatch:
+    inputs:
+      openssl_version:
+        description: "openssl version"
+        required: false
+        default: "OpenSSL_1_1_1i"
+jobs:
+  build:
+    runs-on: ${{ matrix.ARCH.RUNNER }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ARCH:
+          - NAME: x86_64
+            ARTIFACT_NAME: x86-64
+            RUNNER: macos-15-intel
+            CFLAGS: "-mmacosx-version-min=10.10 -march=core2"
+            OPENSSLDIR: "/usr/local/etc/openssl@1.1"
+          - NAME: arm64
+            ARTIFACT_NAME: arm64
+            RUNNER: macos-14
+            CFLAGS: "-mmacosx-version-min=11.0"
+            OPENSSLDIR: "/opt/homebrew/etc/openssl@1.1"
+    name: "Build OpenSSL for macOS (${{ matrix.ARCH.NAME }})"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download OpenSSL
+        run: curl -Lo openssl.tar.gz https://github.com/openssl/openssl/archive/refs/tags/${{ inputs.openssl_version }}.tar.gz
+      - name: Extract OpenSSL
+        run: tar zxf openssl.tar.gz
+      - name: Apply OpenSSL patches
+        # openssl_patches/ lives inside the fork source — populated by the
+        # CVE-2023-0286 / 0401 / 50782 / 2024-0727 reshape patches.
+        run: |
+          cd openssl*
+          for p in $GITHUB_WORKSPACE/openssl_patches/*.patch; do
+            git apply --whitespace=fix "$p"
+          done
+      - name: Build OpenSSL
+        run: |
+          set -x
+          mkdir artifact
+          BASEDIR=$(pwd)
+          cd openssl*
+          # Use the brew openssldir so pyopenssl users with homebrew installed
+          # will have roots for TLS. This is obviously not great but we live in
+          # an imperfect world.
+          perl ./Configure \
+              --prefix="${BASEDIR}/artifact" \
+              --openssldir=${{ matrix.ARCH.OPENSSLDIR }} \
+              darwin64-${{ matrix.ARCH.NAME }}-cc \
+              $OPENSSL_BUILD_FLAGS
+          make -j$(sysctl -n hw.logicalcpu)
+          make install_sw
+        env:
+          CFLAGS: ${{ matrix.ARCH.CFLAGS }}
+
+      - uses: actions/upload-artifact@v4.4.0
+        with:
+          name: "openssl-macos-${{ matrix.ARCH.ARTIFACT_NAME }}"
+          path: artifact/

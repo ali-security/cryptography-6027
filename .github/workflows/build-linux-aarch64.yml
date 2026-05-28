@@ -1,0 +1,64 @@
+name: Linux aarch64 wheels
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "cryptography version"
+        required: true
+        default: "3.4.8"
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        BUILD:
+          - {PLATFORM: "manylinux2014_aarch64", IMAGE: "quay.io/pypa/manylinux2014_aarch64:latest", PY: "cp39-cp39"}
+          - {PLATFORM: "musllinux_1_1_aarch64", IMAGE: "quay.io/pypa/musllinux_1_1_aarch64:latest", PY: "cp310-cp310"}
+    name: "${{ matrix.BUILD.PLATFORM }} cp36-abi3"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build wheel in ${{ matrix.BUILD.IMAGE }}
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD:/src" -w /src \
+            -e PLATFORM='${{ matrix.BUILD.PLATFORM }}' \
+            -e PY='${{ matrix.BUILD.PY }}' \
+            '${{ matrix.BUILD.IMAGE }}' \
+            bash -c '
+              set -euo pipefail
+              export PYTHON=/opt/python/${PY}/bin/python
+              # Build patched OpenSSL 1.1.1i inline. openssl_patches/ inside the
+              # fork source was populated by the CVE-* reshape patches.
+              curl -Lo /tmp/openssl.tgz https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_1_1_1i.tar.gz
+              tar xzf /tmp/openssl.tgz -C /tmp/
+              cd /tmp/openssl-OpenSSL_1_1_1i
+              for p in /src/openssl_patches/*.patch; do
+                git apply --ignore-whitespace --whitespace=nowarn "$p"
+              done
+              ./config no-shared -fPIC --prefix=/opt/sealedopenssl
+              make -j$(nproc) && make install_sw
+              # Install Rust stable (matches what upstream cryptography 3.4.8 was built with: stable as of 2021-08-24 = 1.54.0)
+              export CARGO_HOME=/usr/local/cargo
+              export RUSTUP_HOME=/usr/local/rustup
+              export PATH=/usr/local/cargo/bin:$PATH
+              curl -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+              sh /tmp/rustup-init.sh -y --default-toolchain 1.54.0 --no-modify-path
+              # Build the wheel from the checked-out fork source (no PyPI re-download).
+              # All CVE source patches are ALREADY APPLIED in the fork branch
+              # (cp36-abi3 Python+test hunks); only OpenSSL patches need to be
+              # applied to the bundled OpenSSL above.
+              cd /src
+              export CFLAGS="-I/opt/sealedopenssl/include -Wl,--exclude-libs,ALL"
+              export LDFLAGS="-L/opt/sealedopenssl/lib"
+              ${PYTHON} -m pip install -U wheel cffi setuptools-rust setuptools pip
+              mkdir -p /tmp/tmpwheelhouse
+              ${PYTHON} setup.py bdist_wheel --py-limited-api=cp36
+              mv dist/cryptography*.whl /tmp/tmpwheelhouse/
+              ${PYTHON} -m pip install -U auditwheel
+              ${PYTHON} -m auditwheel repair /tmp/tmpwheelhouse/cryptograph*.whl -w /src/wheelhouse/ --plat ${PLATFORM}
+            '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "cryptography-${{ inputs.version }}-${{ matrix.BUILD.PLATFORM }}"
+          path: wheelhouse/

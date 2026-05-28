@@ -11,7 +11,7 @@ shlib_sed() {
 }
 
 if [[ "${TYPE}" == "openssl" ]]; then
-  curl -O "https://www.openssl.org/source/openssl-${VERSION}.tar.gz"
+  curl -LO "https://www.openssl.org/source/openssl-${VERSION}.tar.gz"
   tar zxf "openssl-${VERSION}.tar.gz"
   pushd "openssl-${VERSION}"
   # CONFIG_FLAGS is a global coming from a previous step
@@ -24,7 +24,7 @@ if [[ "${TYPE}" == "openssl" ]]; then
   make install_sw install_ssldirs
   popd
 elif [[ "${TYPE}" == "libressl" ]]; then
-  curl -O "https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${VERSION}.tar.gz"
+  curl -LO "https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${VERSION}.tar.gz"
   tar zxf "libressl-${VERSION}.tar.gz"
   pushd "libressl-${VERSION}"
   ./config -Wl -Wl,-Bsymbolic-functions -fPIC shared --prefix="${OSSL_PATH}"

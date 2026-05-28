@@ -1,0 +1,55 @@
+name: Windows OpenSSL
+on:
+  workflow_dispatch:
+    inputs:
+      openssl_version:
+        description: "openssl version"
+        required: false
+        default: "OpenSSL_1_1_1i"
+jobs:
+  build:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        WINDOWS:
+          - {ARCH: "x86", WINDOWS: "win32", CONFIG: "VC-WIN32", ARTIFACT: "x86"}
+          - {ARCH: "x64", WINDOWS: "win64", CONFIG: "VC-WIN64A", ARTIFACT: "x64"}
+    name: "Build OpenSSL for Windows (${{ matrix.WINDOWS.ARCH }})"
+    steps:
+      - name: Disable Git autocrlf
+        run: git config --global core.autocrlf false
+        shell: bash
+      - uses: actions/checkout@v4
+      - name: Download OpenSSL source
+        run: |
+          curl -Lo openssl.tar.gz https://github.com/openssl/openssl/archive/refs/tags/${{ inputs.openssl_version }}.tar.gz
+          tar zxf openssl.tar.gz
+        shell: bash
+      - name: Apply OpenSSL patches
+        # openssl_patches/ lives inside the fork source — populated by the
+        # CVE-2023-0286 / 0401 / 50782 / 2024-0727 reshape patches.
+        run: |
+          cd openssl-${{ inputs.openssl_version }}
+          for patch in "$GITHUB_WORKSPACE"/openssl_patches/*.patch; do
+            echo "Applying $patch"
+            tr -d '\r' < "$patch" > /tmp/patch.tmp
+            git apply --ignore-whitespace --whitespace=nowarn /tmp/patch.tmp
+          done
+        shell: bash
+      - name: Set up MSVC environment (${{ matrix.WINDOWS.ARCH }})
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.WINDOWS.ARCH }}
+      - name: Set up NASM
+        uses: ilammy/setup-nasm@v1
+      - name: Build OpenSSL (${{ matrix.WINDOWS.CONFIG }})
+        run: |
+          cd openssl-${{ inputs.openssl_version }}
+          perl Configure ${{ matrix.WINDOWS.CONFIG }} no-shared --prefix=$Env:GITHUB_WORKSPACE\OpenSSL --openssldir=$Env:GITHUB_WORKSPACE\OpenSSL\ssl
+          nmake
+          nmake install_sw
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "openssl-windows-${{ matrix.WINDOWS.ARTIFACT }}"
+          path: OpenSSL
