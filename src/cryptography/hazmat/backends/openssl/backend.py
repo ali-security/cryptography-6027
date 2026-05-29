@@ -726,6 +726,7 @@ class Backend(object):
             ec_cdata = self._lib.EVP_PKEY_get1_EC_KEY(evp_pkey)
             self.openssl_assert(ec_cdata != self._ffi.NULL)
             ec_cdata = self._ffi.gc(ec_cdata, self._lib.EC_KEY_free)
+            self._validate_ec_public_key(ec_cdata)
             return _EllipticCurvePublicKey(self, ec_cdata, evp_pkey)
         elif key_type in self._dh_types:
             dh_cdata = self._lib.EVP_PKEY_get1_DH(evp_pkey)
@@ -1562,6 +1563,7 @@ class Backend(object):
         ec_cdata = self._ec_key_set_public_key_affine_coordinates(
             ec_cdata, numbers.x, numbers.y
         )
+        self._validate_ec_public_key(ec_cdata)
         evp_pkey = self._ec_cdata_to_evp_pkey(ec_cdata)
 
         return _EllipticCurvePublicKey(self, ec_cdata, evp_pkey)
@@ -1583,6 +1585,7 @@ class Backend(object):
 
         res = self._lib.EC_KEY_set_public_key(ec_cdata, point)
         self.openssl_assert(res == 1)
+        self._validate_ec_public_key(ec_cdata)
         evp_pkey = self._ec_cdata_to_evp_pkey(ec_cdata)
         return _EllipticCurvePublicKey(self, ec_cdata, evp_pkey)
 
@@ -1857,6 +1860,42 @@ class Backend(object):
             raise ValueError("Invalid EC key.")
 
         return ctx
+
+    def _validate_ec_public_key(self, ec_cdata):
+        """
+        Validates that an EC public key is not at infinity and, for curves
+        with cofactor > 1, validates that the point is in the correct subgroup.
+        """
+        # Check if the public key point is at infinity
+        point = self._lib.EC_KEY_get0_public_key(ec_cdata)
+        if point == self._ffi.NULL:
+            raise ValueError("Invalid EC key (point is NULL)")
+
+        group = self._lib.EC_KEY_get0_group(ec_cdata)
+        self.openssl_assert(group != self._ffi.NULL)
+
+        # Check for point at infinity
+        res = self._lib.EC_POINT_is_at_infinity(group, point)
+        if res == 1:
+            raise ValueError("Invalid EC key (point at infinity)")
+
+        # For curves with cofactor > 1, perform full validation
+        with self._tmp_bn_ctx() as bn_ctx:
+            cofactor = self._lib.BN_CTX_get(bn_ctx)
+            self.openssl_assert(cofactor != self._ffi.NULL)
+
+            res = self._lib.EC_GROUP_get_cofactor(group, cofactor, bn_ctx)
+            self.openssl_assert(res == 1)
+
+            # Check if cofactor is greater than 1
+            if self._lib.BN_cmp(cofactor, self._lib.BN_value_one()) != 0:
+                # Cofactor > 1, need to validate the key is in the correct subgroup
+                res = self._lib.EC_KEY_check_key(ec_cdata)
+                if res != 1:
+                    self._consume_errors()
+                    raise ValueError(
+                        "Invalid EC key (key out of range, infinity, etc.)"
+                    )
 
     def _private_key_bytes(
         self, encoding, format, encryption_algorithm, key, evp_pkey, cdata
